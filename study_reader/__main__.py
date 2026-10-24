@@ -12,6 +12,7 @@ def main():
     tasks = sub.add_parser('tasks', help='Parse an HTML export without network access')
     tasks.add_argument('html', type=Path)
     tasks.add_argument('--view', choices=('upcoming', 'past', 'overdue'), default='upcoming')
+    tasks.add_argument('--timezone', help='Verified account IANA timezone, e.g. Asia/Shanghai; no default')
     grades = sub.add_parser('grades', help='Parse a class core_tasks HTML export')
     grades.add_argument('html', type=Path)
     grades.add_argument('--class-id', required=True, type=int)
@@ -23,7 +24,7 @@ def main():
             result = UnconfiguredTimetableProvider().read()
         elif args.command == 'tasks':
             rows, next_url, errors = parse_tasks(args.html.read_text(encoding='utf-8'),
-                                                TASKS, now(), args.view, 'offline')
+                                                TASKS, now(), args.view, 'offline', timezone_name=args.timezone)
             rows, conflicts = merge_tasks(rows)
             result = {'schema_version': 1, 'source': 'managebac', 'freshness': 'offline_unknown',
                       'complete': False, 'tasks': rows, 'next_url': next_url,

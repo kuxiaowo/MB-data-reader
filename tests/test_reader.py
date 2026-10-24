@@ -31,7 +31,7 @@ class FakeTransport:
 
 class ReaderTests(unittest.TestCase):
     def test_multiline_tasks_date_and_entity(self):
-        tasks, following, errors = parse_tasks(TASK_HTML)
+        tasks, following, errors = parse_tasks(TASK_HTML, timezone_name="Asia/Shanghai")
         self.assertEqual(len(tasks), 2)
         self.assertEqual(tasks[0]['title'], 'Synthetic & Task')
         self.assertEqual(tasks[0]['due']['value'], '2026-10-24T13:30:00+08:00')
@@ -190,6 +190,49 @@ class ReaderTests(unittest.TestCase):
             t._opener.open.side_effect = exc
             with self.assertRaisesRegex(ReaderError, '^' + code + '$'):
                 t.get(TASKS)
+
+    def test_assessed_pending_is_not_submission_inference(self):
+        html = TASK_HTML.replace('<div class="f-tile__suffix">',
+            '<div class="labels-set"><span class="badge color-box-gray"><span class="badge-label">Pending</span></span></div><div class="f-tile__suffix">')
+        rows, _, _ = parse_tasks(html)
+        self.assertEqual(rows[0]['assessment_status'], 'Assessed')
+        self.assertEqual(rows[0]['badge_labels_raw'], ['Pending'])
+        self.assertIsNone(rows[0]['submission_status'])
+        self.assertIsNone(rows[1]['assessment_status'])
+
+    def test_due_score_area_not_an_assessment_or_submission_status(self):
+        html = TASK_HTML.replace('f-task-score--assessment', 'f-task-score--due')
+        rows, _, _ = parse_tasks(html)
+        self.assertIsNone(rows[0]['assessment_status'])
+        self.assertIsNone(rows[0]['submission_status'])
+        html = TASK_HTML.replace('f-task-score--assessment', 'f-task-score--not-assessed')
+        rows, _, _ = parse_tasks(html)
+        self.assertEqual(rows[0]['assessment_status'], 'Not Assessed')
+        self.assertIsNone(rows[0]['submission_status'])
+
+    def test_timezone_required_and_never_infers_missing_year(self):
+        raw = 'Oct 24, 2026, 1:30 PM'
+        self.assertIsNone(due_date(raw)['value'])
+        self.assertEqual(due_date(raw)['resolution'], 'timezone_required')
+        self.assertEqual(due_date(raw, timezone_name='Asia/Shanghai')['value'], '2026-10-24T13:30:00+08:00')
+        self.assertEqual(due_date(raw, timezone_name='UTC')['value'], '2026-10-24T13:30:00+00:00')
+        self.assertIsNone(due_date('Jan 1, 1:30 PM', timezone_name='Asia/Shanghai')['value'])
+        with self.assertRaisesRegex(ReaderError, 'invalid_timezone_configuration'):
+            parse_tasks(TASK_HTML, timezone_name='Invalid/Timezone')
+
+    def test_dst_ambiguity_and_gap_are_not_guessed(self):
+        for raw, reason in (('Nov 1, 2026, 1:30 AM', 'ambiguous_local_time'),
+                            ('Mar 8, 2026, 2:30 AM', 'nonexistent_local_time')):
+            due = due_date(raw, timezone_name='America/New_York')
+            self.assertIsNone(due['value'])
+            self.assertEqual(due['resolution'], reason)
+
+    def test_reader_passes_explicit_timezone(self):
+        t = FakeTransport({TASKS + '?view=' + v: TASK_HTML if v == 'upcoming' else EMPTY
+                           for v in ('upcoming', 'past', 'overdue')})
+        result = ManageBacReader(t, timezone_name='Asia/Shanghai').read(False)
+        self.assertTrue(result['complete'])
+        self.assertEqual(result['tasks'][0]['due']['timezone_source'], 'caller_supplied')
 
     def test_timetable_never_claims_fetched(self):
         result = UnconfiguredTimetableProvider().read()

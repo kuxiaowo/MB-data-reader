@@ -1,6 +1,6 @@
 # MB-data-reader
 
-轻量独立的只读学习数据提取器：**Python 3.10+，运行时零第三方依赖**，无网站、数据库、服务器、提醒或后台任务。**未使用真实账号，未完成学校线上数据验证。**
+轻量独立的只读学习数据提取器：**Python 3.10+，运行时零第三方依赖**，无网站、数据库、服务器、提醒或后台任务。**解析器/传输层尚未完成真实会话端到端验证。** 已参考当前页面的脱敏 DOM 结构观察；公开文件不包含真实学生记录。
 
 ## 已实现
 
@@ -15,7 +15,7 @@
 
 ```sh
 python -m unittest discover -s tests -v
-python -m study_reader tasks tests/fixtures/tasks.html --view upcoming
+python -m study_reader tasks tests/fixtures/tasks.html --view upcoming --timezone Asia/Shanghai
 python -m study_reader grades tests/fixtures/grades.html --class-id 12 --class-name 'Test Maths'
 python -m study_reader timetable-status
 ```
@@ -32,7 +32,8 @@ from study_reader.transport import ReadOnlyTransport
 
 # authenticated_cookie_jar 由已有安全登录流程提供；不是字符串或文件路径。
 transport = ReadOnlyTransport(authenticated_cookie_jar)
-result = ManageBacReader(transport, max_pages=30).read()
+result = ManageBacReader(transport, max_pages=30, timezone_name='Asia/Shanghai').read()
+# timezone_name 必须来自已验证的账户设置；不传则不假设任何时区。
 # 先检查 result['complete'] 与 result['errors']，再决定如何私密保存。
 ```
 
@@ -45,9 +46,10 @@ result = ManageBacReader(transport, max_pages=30).read()
 - schema_version=1。`complete` 仅代表本次范围的读取完整性，不是全学期数据保证。
 - provenance 的 source/source_url/fetched_at/parsed_at/freshness 区分来源与时间；读取时间不是校方更新时间，也不保证校方页面绝对最新。
 - 离线输出 `offline_unknown`，fetched_at=null；只有解析时间，单页始终 complete=false。
-- 没日期的任务保留；缺年份/时间不猜默认值，原文保留、value=null。完整英文日期按中国学校 UTC+08:00 解释并标注 timezone_assumption；其它格式未支持时保留原文。
+- 没日期的任务保留；缺年份/时间不猜默认值，原文保留、value=null。完整英文日期也需调用方显式提供已验证的 IANA 时区（`timezone_name` / CLI `--timezone`）；无时区仅保留 `local_value`，`value=null`、`resolution=timezone_required`。已提供时区记录 `timezone_source=caller_supplied`；缺年份仍不猜测。DST 重复/不存在的本地时间保持未解析。其它格式未支持时保留原文。时区数据库由系统提供；不可用时明确报配置错误，不自动退回上海时区。
 - 重复 ID 最后观察覆盖（含 null 清空），views 合并。冲突列出 conflicting_observations 并 complete=false；读取顺序不等于校方更新时间，需审阅/重读。
 - 页数限制、循环、危险/缺 view 分页链接、部分失败都明确报错。失败不丢其它成功数据。pagination complete 仅代表链接遍历；畸形记录另见顶层 errors。
+- 任务 `assessment_status` 与 `submission_status` 分离：仅已观察的明确评定 CSS 类识别 Assessed / Not Assessed。Pending 徽标只保留在 `badge_labels_raw`，不推断为已提交或未提交；`--due` 也不是提交状态。当前任务列表提交状态仍为 null，班级表的独立 Not Submitted 尚未接入；评分与 Pending 可以同时存在。旧 `status` 仅保留评分区文本兼容，不要把它当提交状态；新调用方应使用分离字段。
 - 成绩 evidence=official_page 是“页面直读而非计算”，不是独立真实性认证。分数字符串保留原文；不把任务分数当课程总评。
 - 解析 selector 来源于旧代码；标准库 HTML 树不是完整浏览器 DOM，学校改版可能需更新。未知页面报错，不无声当空列表。
 
@@ -55,7 +57,7 @@ result = ManageBacReader(transport, max_pages=30).read()
 
 离线测试覆盖日期/年份缺失、多行 HTML/实体、时区、官方成绩/缺权重、分数更新清空、同名班级、host allowlist、拒绝重定向、分页上限/循环/失败、登录页、未知布局。网络使用 fake/mock，测试不访问学校。另有编译检查、CLI JSON 冒烟检查。
 
-**尚未验证：真实会话认证、当前线上 HTML、真实任务分页/成绩准确率、课表版本/参数/响应/认证。** 需要后续授权会话或脱敏样本。
+**尚未端到端验证：传输层真实会话认证、完整线上 HTML 解析、真实任务分页/成绩准确率、课表版本/参数/响应/认证。** 当前仅将脱敏实时结构观察转化为虚构回归测试，不代表已抓取全量数据。 需要后续授权会话或脱敏样本。
 
 ## 来源、许可与发布
 

@@ -1,6 +1,7 @@
 """Observed ManageBac HTML selectors, isolated from storage and authentication."""
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from urllib.parse import urljoin, urlsplit, parse_qs
 from .html import Tree, txt
 
@@ -54,21 +55,47 @@ def provenance(url, at, mode='live'):
             'evidence': 'official_page', 'estimated': False}
 
 
-def due_date(raw):
-    # Do not manufacture a year, time or timezone for incomplete dates.
+def date_timezone(timezone_name):
+    if timezone_name is None:
+        return None
+    try:
+        return ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        raise ReaderError('invalid_timezone_configuration') from None
+
+
+def due_date(raw, *, timezone_name=None):
+    # The caller must supply verified account context; never infer the year.
+    zone = date_timezone(timezone_name)
     if not raw:
         return {'raw': None, 'value': None, 'precision': 'unknown'}
     for fmt in ('%b %d, %Y, %I:%M %p', '%B %d, %Y, %I:%M %p'):
         try:
-            dt = datetime.strptime(raw, fmt).replace(tzinfo=timezone(timedelta(hours=8)))
-            return {'raw': raw, 'value': dt.isoformat(), 'precision': 'minute',
-                    'timezone_assumption': 'Asia/Shanghai'}
+            dt = datetime.strptime(raw, fmt)
         except ValueError:
-            pass
-    return {'raw': raw, 'value': None, 'precision': 'unresolved'}
+            continue
+        result = {'raw': raw, 'value': None, 'local_value': dt.isoformat(),
+                  'precision': 'minute', 'timezone': timezone_name,
+                  'timezone_source': 'caller_supplied' if zone else 'unknown'}
+        if zone is None:
+            result['resolution'] = 'timezone_required'
+            return result
+        aware = dt.replace(tzinfo=zone)
+        # Do not manufacture an instant at a DST gap or duplicated wall time.
+        if aware.astimezone(timezone.utc).astimezone(zone).replace(tzinfo=None) != dt:
+            result['resolution'] = 'nonexistent_local_time'
+        elif aware.utcoffset() != dt.replace(tzinfo=zone, fold=1).utcoffset():
+            result['resolution'] = 'ambiguous_local_time'
+        else:
+            result['value'] = aware.isoformat()
+            result['resolution'] = 'resolved'
+        return result
+    return {'raw': raw, 'value': None, 'precision': 'unresolved',
+            'timezone': timezone_name, 'resolution': 'incomplete_or_unsupported_date'}
 
 
-def parse_tasks(html, url=TASKS, fetched_at=None, view='upcoming', mode='live'):
+def parse_tasks(html, url=TASKS, fetched_at=None, view='upcoming', mode='live', *, timezone_name=None):
+    date_timezone(timezone_name)
     if view not in VIEWS:
         raise ValueError('Unknown view')
     root = document(html)
@@ -105,9 +132,14 @@ def parse_tasks(html, url=TASKS, fetched_at=None, view='upcoming', mode='live'):
             score = tile.first(cls='f-task-score')
             status = ('Assessed' if score and score.has('f-task-score--assessment') else
                       'Not Assessed' if score and score.has('f-task-score--not-assessed') else txt(score))
+            assessment_status = ('Assessed' if score and score.has('f-task-score--assessment') else
+                                 'Not Assessed' if score and score.has('f-task-score--not-assessed') else None)
+            badges = [n.text() for n in tile.all(cls='badge-label') if n.text()]
             records.append({'id': 'core_task:' + m.group(1), 'title': a.text(), 'url': href,
-                'course_name': course, 'date_header': date_header, 'due': due_date(raw_date or date_header),
-                'status': status, 'score_raw': txt(score.first('h4')) if score else None,
+                'course_name': course, 'date_header': date_header, 'due': due_date(raw_date or date_header, timezone_name=timezone_name),
+                'status': status, 'assessment_status': assessment_status,
+                'assessment_status_raw': txt(score), 'submission_status': None,
+                'badge_labels_raw': badges, 'score_raw': txt(score.first('h4')) if score else None,
                 'points_raw': txt(score.first('p')) if score else None, 'views': [view],
                 'provenance': provenance(url, fetched_at or now(), mode)})
     next_urls = []
@@ -198,7 +230,7 @@ def merge_tasks(records):
         old = merged.get(key)
         current = dict(record)
         if old:
-            changed = [k for k in ('title', 'due', 'status', 'score_raw', 'points_raw')
+            changed = [k for k in ('title', 'due', 'status', 'assessment_status', 'submission_status', 'score_raw', 'points_raw')
                        if old.get(k) != current.get(k)]
             if changed:
                 conflicts.append({'code': 'conflicting_observations', 'id': key, 'fields': changed,
@@ -209,7 +241,9 @@ def merge_tasks(records):
 
 
 class ManageBacReader:
-    def __init__(self, transport, max_pages=30):
+    def __init__(self, transport, max_pages=30, *, timezone_name=None):
+        date_timezone(timezone_name)
+        self.timezone_name = timezone_name
         if not 1 <= max_pages <= 1000:
             raise ValueError('max_pages must be between 1 and 1000')
         self.transport, self.max_pages = transport, max_pages
@@ -234,7 +268,7 @@ class ManageBacReader:
                         raise ReaderError('pagination_limit')
                     seen.add(url)
                     page = self.transport.get(url)
-                    rows, following, issues = parse_tasks(page, url, now(), view)
+                    rows, following, issues = parse_tasks(page, url, now(), view, timezone_name=self.timezone_name)
                     records.extend(rows)
                     info['pages_read'] += 1
                     for issue in issues:
