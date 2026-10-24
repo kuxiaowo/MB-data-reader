@@ -3,7 +3,7 @@ import argparse
 import json
 from pathlib import Path
 from .managebac import parse_tasks, parse_grades, merge_tasks, now, TASKS, ORIGIN, ReaderError
-from .timetable import UnconfiguredTimetableProvider
+from .timetable import UnconfiguredTimetableProvider, parse_timetable
 
 
 def main():
@@ -17,11 +17,18 @@ def main():
     grades.add_argument('html', type=Path)
     grades.add_argument('--class-id', required=True, type=int)
     grades.add_argument('--class-name', default='')
+    timetable = sub.add_parser('timetable', help='Parse locally supplied rendered timetable HTML; no login/network')
+    timetable.add_argument('html', type=Path)
+    timetable.add_argument('--week-start', help='Verified first-column date, YYYY-MM-DD')
+    timetable.add_argument('--week-end', help='Optional verified last-column date, YYYY-MM-DD')
     sub.add_parser('timetable-status')
     args = parser.parse_args()
     try:
         if args.command == 'timetable-status':
             result = UnconfiguredTimetableProvider().read()
+        elif args.command == 'timetable':
+            result = parse_timetable(args.html.read_text(encoding='utf-8'),
+                                     week_start=args.week_start, week_end=args.week_end)
         elif args.command == 'tasks':
             rows, next_url, errors = parse_tasks(args.html.read_text(encoding='utf-8'),
                                                 TASKS, now(), args.view, 'offline', timezone_name=args.timezone)

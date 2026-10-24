@@ -6,7 +6,7 @@
 
 - ManageBac upcoming / past / overdue 任务；分页、任务 ID 去重；班级与官方总评/assessment categories。
 - 只接受调用方已认证的内存 CookieJar；没有账号密码登录或凭据持久化，没有提交/修改学校数据的功能。
-- 独立 `TimetableProvider` 接口，当前显式 `provider_not_configured`，不是“空课表”。入口 <https://student.hyqzedu.com/app-base-info/app/home>。公开脚本确认 POST 读取路径模板 `/api/${getApiVersion()}/courses-schedule/students/my.schedule.list`，base 为 `https://api.hyqzedu.com/student-web-gateway-api/`；版本、参数、响应和认证仍未知，因此未猜测实现。公开首页在云浏览器显示 token 失效 401；需要后续脱敏样本或用户导出。此 POST 读取路径尚未接入，也未被本工具调用。
+- 独立 `TimetableProvider` 接口及只读 `OfflineTimetableProvider`：解析用户在授权会话中取得的已渲染课表 HTML，不读取/导出认证信息，不调用私有 API。入口 <https://student.hyqzedu.com/app-base-info/app/home>。自动认证/实时抓取尚未安装，`timetable-status` 仍显式返回 `provider_not_configured`；离线解析不等于自动登录已接通。
 - 不估算成绩、不造分数线。`grade_boundaries` / `estimated_grade` 为 null，未知权重也不是 0。
 
 ## 运行（无需安装）
@@ -17,6 +17,7 @@
 python -m unittest discover -s tests -v
 python -m study_reader tasks tests/fixtures/tasks.html --view upcoming --timezone Asia/Shanghai
 python -m study_reader grades tests/fixtures/grades.html --class-id 12 --class-name 'Test Maths'
+python -m study_reader timetable tests/fixtures/timetable.html --week-start 2026-12-28 --week-end 2027-01-03
 python -m study_reader timetable-status
 ```
 
@@ -52,6 +53,21 @@ result = ManageBacReader(transport, max_pages=30, timezone_name='Asia/Shanghai')
 - 任务 `assessment_status` 与 `submission_status` 分离：仅已观察的明确评定 CSS 类识别 Assessed / Not Assessed。Pending 徽标只保留在 `badge_labels_raw`，不推断为已提交或未提交；`--due` 也不是提交状态。当前任务列表提交状态仍为 null，班级表的独立 Not Submitted 尚未接入；评分与 Pending 可以同时存在。旧 `status` 仅保留评分区文本兼容，不要把它当提交状态；新调用方应使用分离字段。
 - 成绩 evidence=official_page 是“页面直读而非计算”，不是独立真实性认证。分数字符串保留原文；不把任务分数当课程总评。
 - 解析 selector 来源于旧代码；标准库 HTML 树不是完整浏览器 DOM，学校改版可能需更新。未知页面报错，不无声当空列表。
+
+## 离线课表（不接私有 API）
+
+```python
+from study_reader.timetable import parse_timetable, OfflineTimetableProvider
+result = parse_timetable(rendered_html, week_start='2026-12-28', week_end='2027-01-03')
+# 或 OfflineTimetableProvider(rendered_html, week_start='2026-12-28').read()
+```
+
+- 输入是**已经渲染**的 `.schedule-card` DOM；普通 SPA 首页源码可能没有课表，届时明确报结构错误。只在本地处理，不抓浏览器 Cookie/token，不自动登录，不发送任何 HTTP。
+- 首列日期必须来自你核实的当前页面周范围（ISO `YYYY-MM-DD`），按七列顺序加天数，支持跨月/跨年。`今` 与数字日期标签只保留原文，不用来猜日期；若页面明确打印完整 ISO 起止范围，可省略参数。实际页面类似 `03月02日 - 03月08日` 的范围需要显式 `week_start`，并校验月/日范围与输入一致；页头年份以 `displayed_year_raw` 保留，不盲目将它作为跨年首日年份，也不以系统当前年份补全；可识别数字年份必须属于首/末日期年份之一。数字日标签只用于矛盾校验：必须等于已映射日期的日，不用于推断日期，`今` 不作数字校验。`week_end` 可选，但提供时必须恰好是首日+6天；可解析 DOM 范围与参数矛盾则拒绝映射。
+- 保留本地起止时间、课程/班级/地点/老师、日期级异常；未提供时区，因此不生成带时区的时间戳。可见上午/下午标签可能有误，解析以数字24小时制时间为准，不将 `上午 14:00` 改成其它时刻。缺失/非法时间保留课程并报告错误；不推测默认时长，不跨夜猜测。
+- 每条课程/异常 `recurring=false`，只描述该日期，不推广成每周模板。没有可靠来源 ID 时为 null，列表位置不是稳定 ID。
+- **空白周/空白日不是空闲证明**：整周无课程为 `data_unavailable`，空白日为 `unknown`；可能是未发布、加载失败或确实无课，不能据此自动安排会议。页面异常文字保留，不能定位到一天的异常标记 `date=null` 并报错。
+- 离线结果始终 `complete=false`、`freshness=offline_unknown`、`fetched_at=null`；`observed_lessons` 只说明 DOM 中看到了课程，不保证整周完整或最新。真实 HTML 和输出均可能含学生隐私，请只保存在本地 `private/`，勿提交。
 
 ## 验证
 
