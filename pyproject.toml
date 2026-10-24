@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "MB-data-reader"
+version = "0.1.0"
+description = "Read-only, dependency-free school data extraction"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+study-reader = "study_reader.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["study_reader*"]

@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "source": "managebac",
+  "freshness": "offline_unknown",
+  "complete": false,
+  "errors": [],
+  "coverage": "single_offline_class_page",
+  "grades": [
+    {
+      "class_id": "12",
+      "class_name": "Test Maths",
+      "overall": {
+        "name": "Overall",
+        "weight_percent": null,
+        "grade_raw": "6",
+        "percentage": 80.0,
+        "raw_value": "6 (80%)",
+        "estimated": false
+      },
+      "categories": [
+        {
+          "name": "Tests",
+          "weight_percent": 60.0,
+          "grade_raw": "6",
+          "percentage": 81.5,
+          "raw_value": "6 (81.5%)",
+          "estimated": false
+        },
+        {
+          "name": "Homework",
+          "weight_percent": null,
+          "grade_raw": null,
+          "percentage": null,
+          "raw_value": "Not assessed",
+          "estimated": false
+        }
+      ],
+      "grade_boundaries": null,
+      "boundaries_status": "not_read",
+      "estimated_grade": null,
+      "provenance": {
+        "source": "managebac",
+        "source_url": "https://sdgj.managebac.cn/student/classes/12/core_tasks",
+        "fetched_at": null,
+        "parsed_at": "2026-10-24T08:03:41.407982+00:00",
+        "freshness": "offline_unknown",
+        "evidence": "official_page",
+        "estimated": false
+      }
+    }
+  ]
+}
